@@ -17,7 +17,7 @@
 #include "opengm/operations/minimizer.hxx"
 #include "opengm/operations/maximizer.hxx"
 #include "opengm/inference/inference.hxx"
-#include "opengm/inference/visitors/visitors.hxx"
+#include "opengm/inference/visitors/visitor.hxx"
 
 namespace opengm {
 
@@ -40,9 +40,9 @@ public:
    typedef ACC AccumulatorType;
    typedef GM GraphicalModelType;
    OPENGM_GM_TYPE_TYPEDEFS; 
-   typedef visitors::VerboseVisitor<LPCplex<GM,ACC> > VerboseVisitorType;
-   typedef visitors::EmptyVisitor<LPCplex<GM,ACC> >   EmptyVisitorType;
-   typedef visitors::TimingVisitor<LPCplex<GM,ACC> >  TimingVisitorType;
+   typedef VerboseVisitor<LPCplex<GM, ACC> > VerboseVisitorType;
+   typedef TimingVisitor<LPCplex<GM, ACC> > TimingVisitorType;
+   typedef EmptyVisitor< LPCplex<GM, ACC> > EmptyVisitorType;
  
    class Parameter {
    public:
@@ -110,14 +110,14 @@ public:
    size_t lpFactorVi(const IndexType factorIndex,LABELING_ITERATOR labelingBegin,LABELING_ITERATOR labelingEnd)const;
    template<class LPVariableIndexIterator, class CoefficientIterator>
    void addConstraint(LPVariableIndexIterator, LPVariableIndexIterator, CoefficientIterator,const ValueType&, const ValueType&, const char * name=0);
-
+   template<class LPVariableIndexIterator, class CoefficientIterator>
+   void removeConstraint(LPVariableIndexIterator, LPVariableIndexIterator, CoefficientIterator,const ValueType&, const ValueType&, const char * name=0);
 private:
    const GraphicalModelType& gm_;
    Parameter parameter_;
    std::vector<size_t> idNodesBegin_; 
    std::vector<size_t> idFactorsBegin_; 
    std::vector<std::vector<size_t> > unaryFactors_;
-   bool inferenceStarted_;
     
    IloEnv env_;
    IloModel model_;
@@ -135,7 +135,7 @@ LPCplex<GM, ACC>::LPCplex
    const GraphicalModelType& gm, 
    const Parameter& para
 )
-:  gm_(gm), inferenceStarted_(false)
+:  gm_(gm) 
 {
    if(typeid(OperatorType) != typeid(opengm::Adder)) {
       throw RuntimeError("This implementation does only supports Min-Plus-Semiring and Max-Plus-Semiring.");
@@ -301,8 +301,7 @@ LPCplex<GM, ACC>::infer
 (
    VisitorType& visitor
 ) { 
-   visitor.begin(*this);
-   inferenceStarted_ = true;
+   visitor.begin(*this,ACC::template neutral<ValueType>(),ACC::template ineutral<ValueType>());
    try {
       // verbose options
       if(parameter_.verbose_ == false) {
@@ -312,7 +311,7 @@ LPCplex<GM, ACC>::infer
 	} 
          
       // tolarance settings
-      cplex_.setParam(IloCplex::EpOpt, 1e-7); // Optimality Tolerance
+      cplex_.setParam(IloCplex::EpOpt, 1e-9); // Optimality Tolerance
       cplex_.setParam(IloCplex::EpInt, 0);    // amount by which an integer variable can differ from an integer
       cplex_.setParam(IloCplex::EpAGap, 0);   // Absolute MIP gap tolerance
       cplex_.setParam(IloCplex::EpGap, parameter_.epGap_); // Relative MIP gap tolerance
@@ -350,7 +349,7 @@ LPCplex<GM, ACC>::infer
       std::cout << "caught CPLEX exception: " << e << std::endl;
       return UNKNOWN;
    } 
-   visitor.end(*this);
+   visitor.end(*this,this->value(),this->bound());
    return NORMAL;
 }
  
@@ -367,26 +366,18 @@ LPCplex<GM, ACC>::arg
    const size_t N
 ) const {
    x.resize(gm_.numberOfVariables());
-   if(inferenceStarted_) {
-      for(size_t node = 0; node < gm_.numberOfVariables(); ++node) {
-         ValueType value = sol_[idNodesBegin_[node]];
-         size_t state = 0;
-         for(size_t i = 1; i < gm_.numberOfLabels(node); ++i) {
-            if(sol_[idNodesBegin_[node]+i] > value) {
-               value = sol_[idNodesBegin_[node]+i];
-               state = i;
-            }
+   for(size_t node = 0; node < gm_.numberOfVariables(); ++node) {
+      ValueType value = sol_[idNodesBegin_[node]];
+      size_t state = 0;
+      for(size_t i = 1; i < gm_.numberOfLabels(node); ++i) {
+         if(sol_[idNodesBegin_[node]+i] > value) {
+            value = sol_[idNodesBegin_[node]+i];
+            state = i;
          }
-         x[node] = state;
       }
-      return NORMAL;
-   } else {
-      for(size_t node = 0; node < gm_.numberOfVariables(); ++node) {
-         x[node] = 0;
-      }
-      return UNKNOWN;
+      x[node] = state;
    }
-
+   return NORMAL;
 }
 
 template <class GM, class ACC>
@@ -445,17 +436,12 @@ typename GM::ValueType LPCplex<GM, ACC>::value() const {
 }
 
 template<class GM, class ACC>
-typename GM::ValueType LPCplex<GM, ACC>::bound() const { 
-   if(inferenceStarted_) {
-      if(parameter_.integerConstraint_) {
-         return cplex_.getBestObjValue()+constValue_;
-      }
-      else{
-         return  cplex_.getObjValue()+constValue_;
-      }
+typename GM::ValueType LPCplex<GM, ACC>::bound() const {
+   if(parameter_.integerConstraint_) {
+      return cplex_.getBestObjValue()+constValue_;
    }
    else{
-      return ACC::template ineutral<ValueType>();
+      return  cplex_.getObjValue()+constValue_;
    }
 }
 
@@ -539,6 +525,38 @@ inline void LPCplex<GM, ACC>::addConstraint(
       ++coefficient;
    }
    model_.add(constraint);
+   // adding constraints does not require a re-initialization of the
+   // object cplex_. cplex_ is initialized in the constructor.
+}
+
+/// \brief remove constraint
+/// \param viBegin iterator to the beginning of a sequence of variable indices
+/// \param viEnd iterator to the end of a sequence of variable indices
+/// \param coefficient iterator to the beginning of a sequence of coefficients
+/// \param lowerBound lower bound
+/// \param upperBound upper bound
+///
+/// variable indices refer to variables of the LP that is set up
+/// in the constructor of LPCplex (NOT to the variables of the
+/// graphical model).
+///
+template<class GM, class ACC>
+template<class LPVariableIndexIterator, class CoefficientIterator>
+inline void LPCplex<GM, ACC>::removeConstraint(
+   LPVariableIndexIterator viBegin,
+   LPVariableIndexIterator viEnd,
+   CoefficientIterator coefficient,
+   const ValueType& lowerBound,
+   const ValueType& upperBound,
+   const char * name
+) {
+   IloRange constraint(env_, lowerBound, upperBound, name);
+   while(viBegin != viEnd) {
+      constraint.setLinearCoef(x_[*viBegin], *coefficient);
+      ++viBegin;
+      ++coefficient;
+   }
+   model_.remove(constraint);
    // adding constraints does not require a re-initialization of the
    // object cplex_. cplex_ is initialized in the constructor.
 }
