@@ -111,7 +111,9 @@ public:
    template<class LPVariableIndexIterator, class CoefficientIterator>
    void addConstraint(LPVariableIndexIterator, LPVariableIndexIterator, CoefficientIterator,const ValueType&, const ValueType&, const char * name=0);
    template<class LPVariableIndexIterator, class CoefficientIterator>
-   void removeConstraint(LPVariableIndexIterator, LPVariableIndexIterator, CoefficientIterator,const ValueType&, const ValueType&, const char * name=0);
+   void addConstraint(LPVariableIndexIterator, LPVariableIndexIterator, CoefficientIterator,const ValueType&, const ValueType&, const char * name, IloRange* range);
+   void removeConstraint(IloRange*);
+   IloModel& getModel();
 private:
    const GraphicalModelType& gm_;
    Parameter parameter_;
@@ -511,38 +513,6 @@ LPCplex<GM, ACC>::lpFactorVi
 template<class GM, class ACC>
 template<class LPVariableIndexIterator, class CoefficientIterator>
 inline void LPCplex<GM, ACC>::addConstraint(
-   LPVariableIndexIterator viBegin, 
-   LPVariableIndexIterator viEnd, 
-   CoefficientIterator coefficient, 
-   const ValueType& lowerBound, 
-   const ValueType& upperBound,
-   const char * name
-) {
-   IloRange constraint(env_, lowerBound, upperBound, name);
-   while(viBegin != viEnd) {
-      constraint.setLinearCoef(x_[*viBegin], *coefficient);
-      ++viBegin;
-      ++coefficient;
-   }
-   model_.add(constraint);
-   // adding constraints does not require a re-initialization of the
-   // object cplex_. cplex_ is initialized in the constructor.
-}
-
-/// \brief remove constraint
-/// \param viBegin iterator to the beginning of a sequence of variable indices
-/// \param viEnd iterator to the end of a sequence of variable indices
-/// \param coefficient iterator to the beginning of a sequence of coefficients
-/// \param lowerBound lower bound
-/// \param upperBound upper bound
-///
-/// variable indices refer to variables of the LP that is set up
-/// in the constructor of LPCplex (NOT to the variables of the
-/// graphical model).
-///
-template<class GM, class ACC>
-template<class LPVariableIndexIterator, class CoefficientIterator>
-inline void LPCplex<GM, ACC>::removeConstraint(
    LPVariableIndexIterator viBegin,
    LPVariableIndexIterator viEnd,
    CoefficientIterator coefficient,
@@ -556,10 +526,63 @@ inline void LPCplex<GM, ACC>::removeConstraint(
       ++viBegin;
       ++coefficient;
    }
-   model_.remove(constraint);
+    model_.add(constraint);
    // adding constraints does not require a re-initialization of the
    // object cplex_. cplex_ is initialized in the constructor.
 }
+
+template<class GM, class ACC>
+template<class LPVariableIndexIterator, class CoefficientIterator>
+inline void LPCplex<GM, ACC>::addConstraint(
+   LPVariableIndexIterator viBegin,
+   LPVariableIndexIterator viEnd,
+   CoefficientIterator coefficient,
+   const ValueType& lowerBound,
+   const ValueType& upperBound,
+   const char * name,
+   IloRange *constraint
+) {
+   *constraint = IloRange(env_, lowerBound, upperBound, name);
+   while(viBegin != viEnd) {
+      constraint->setLinearCoef(x_[*viBegin], *coefficient);
+      ++viBegin;
+      ++coefficient;
+   }
+   model_.add(*constraint);
+   // adding constraints does not require a re-initialization of the
+   // object cplex_. cplex_ is initialized in the constructor.
+}
+
+
+/// \brief remove constraint
+/// \param viBegin iterator to the beginning of a sequence of variable indices
+/// \param viEnd iterator to the end of a sequence of variable indices
+/// \param coefficient iterator to the beginning of a sequence of coefficients
+/// \param lowerBound lower bound
+/// \param upperBound upper bound
+///
+/// variable indices refer to variables of the LP that is set up
+/// in the constructor of LPCplex (NOT to the variables of the
+/// graphical model).
+///
+template<class GM, class ACC>
+inline void LPCplex<GM, ACC>::removeConstraint(IloRange *range) {
+   model_.remove(*range);
+  // we need to reinitialize the solver after removing a constraint:
+   try {
+      cplex_ = IloCplex(model_);
+   }
+   catch(IloCplex::Exception& e) {
+    throw std::runtime_error("CPLEX exception");
+   }
+
+}
+
+template<class GM, class ACC>
+inline IloModel& LPCplex<GM, ACC>::getModel() {
+    return model_;
+}
+
 
 } // end namespace opengm
 
