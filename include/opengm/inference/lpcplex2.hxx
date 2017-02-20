@@ -35,6 +35,16 @@ public:
    struct RebindGmAndAcc{
        typedef LPCplex2<_GM, _ACC > type;
    };
+
+   void variable(const size_t nodeId, IndependentFactorType& out) const
+   {
+      size_t var[] = {nodeId};
+      size_t shape[] = {LPInferenceBase<LPCplex2<GM_TYPE, ACC_TYPE> >::graphicalModel().numberOfLabels(nodeId)};
+      out.assign(var, var + 1, shape, shape + 1);
+      for(size_t i = 0; i < LPInferenceBase<LPCplex2<GM_TYPE, ACC_TYPE> >::graphicalModel().numberOfLabels(nodeId); ++i) {
+         out(i) = LPSolverCplex::cplexSolution_[LPInferenceBase<LPCplex2<GM_TYPE, ACC_TYPE> >::nodesLPVariablesOffset_[nodeId]+i];
+      }
+   }
 };
 
 template<class GM_TYPE, class ACC_TYPE>

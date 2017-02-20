@@ -35,6 +35,10 @@ public:
    struct RebindGmAndAcc{
        typedef LPGurobi2<_GM, _ACC > type;
    };
+
+   void variable(const size_t nodeId, IndependentFactorType& out) const{
+      throw std::runtime_error("not implemented");
+   }
 };
 
 template<class GM_TYPE, class ACC_TYPE>
