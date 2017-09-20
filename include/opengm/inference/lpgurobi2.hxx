@@ -37,7 +37,13 @@ public:
    };
 
    void variable(const size_t nodeId, IndependentFactorType& out) const{
-      throw std::runtime_error("not implemented");
+	   size_t var[] = {nodeId};
+	   size_t shape[] = {LPInferenceBase<LPGurobi2<GM_TYPE, ACC_TYPE> >::graphicalModel().numberOfLabels(nodeId)};
+	   out.assign(var, var + 1, shape, shape + 1);
+	   for(size_t i = 0; i < LPInferenceBase<LPGurobi2<GM_TYPE, ACC_TYPE> >::graphicalModel().numberOfLabels(nodeId); ++i) {
+		   out(i) = LPSolverGurobi::gurobiSolution_[LPInferenceBase<LPGurobi2<GM_TYPE, ACC_TYPE> >::nodesLPVariablesOffset_[nodeId]+i];
+	   }
+	   //throw std::runtime_error("not implemented");
    }
 };
 
